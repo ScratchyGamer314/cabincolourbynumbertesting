@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>CaBiN</title>
+	<link rel="stylesheet" href="fonts/RedHatDisplay/style.css">
+	<link rel="stylesheet" href="node_modules/bootstrap/dist/css/bootstrap.css">
+	<link rel="stylesheet" href="node_modules/jquery-ui-dist/jquery-ui.css">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+
+<style>
+body, p, h1 {
+	font-family: "RedHatDisplay", Sans, Arial, Helvetica, sans-serif;
+	text-rendering: optimizeLegibility;
+	background-color:#e2e2e2;
+}
+#tabCrop {
+	height: calc(100vh - 86px);
+	width: 100%;
+}
+#imgFinal {
+	background-size: contain;
+	background-position: center top;
+	background-repeat: no-repeat;
+	height: calc(100vh - 86px);
+	width: 100%;
+	image-rendering: pixelated;
+}
+.lesserText {
+	color:#8e8e8e;
+}
+</style>
+
+<script>
+window.$ = window.jQuery = require('jquery');
+require('jquery-ui-dist/jquery-ui')
+</script>
+
+<link rel="stylesheet" type="text/css" href="libraries/jquery.imgareaselect/css/imgareaselect-default.css" />
+<script type="text/javascript" src="libraries/jquery.imgareaselect/scripts/jquery.imgareaselect.pack.js"></script>
+
+
+<script src="node_modules/bootstrap/dist/js/bootstrap.js"></script>
+<script src="code.js"></script>
+
+<script>
+
+function reduceColours() {
+	var colourCount = $("#coloursSlider").slider("value");
+	$("#coloursCount").text(colourCount);
+
+
+	// testing kmeans colour reduction
+	const KMeansRunner = require("./libraries/palette-maker/javascript/kmeans-runner.js");
+
+	var pallette = new Pallette();
+	pallette.loadFromImage(smallImage);
+
+	var pixels = pallette.getColours();
+
+	console.log("pixels from pallette", pixels);
+
+/*
+	pixels = [];
+	*/
+
+/*
+	pixels = [
+		{red:0, green:100, blue:100},
+		{red:200, green:100, blue:100},
+		{red:200, green:0, blue:100},
+		{red:100, green:100, blue:0}
+	];
+*/
+
+	console.log("pixels from hard coded", pixels);
+
+	/*
+    for (var x=0; x < canvas.width; x++){
+      for (var y=0; y < canvas.height; y++){
+        var pixel = canvas.getContext('2d').getImageData(x, y, 1, 1).data;
+        pixels.push({
+          red: pixel[0],
+          green: pixel[1],
+          blue: pixel[2]
+        });
+      }
+    }
+	*/
+
+	const ImageUtil = require("./libraries/palette-maker/javascript/image-util.js");
+
+	window._ = require("lodash");
+	let kmeansRunner = new KMeansRunner();
+	var colourCount = $("#coloursSlider").slider("value");
+	let result = kmeansRunner.run(colourCount, pixels);
+	let groups = result.clusters;
+	let reducedPalette = [];
+
+	for(var i=0; i<groups.length; i++) {
+		var averageColour = ImageUtil.computeAverageColor(groups[i]);
+//		groups[i].averageColour = averageColour;
+		reducedPalette.push(averageColour);
+	}
+
+
+	console.log(result);
+	console.log(reducedPalette);
+}
+
+
+
+function resize() {
+	if (originalImage == null) return;
+	var size = originalImage.getSize();
+
+	var cropRectangle = {
+		x:parseInt(cropSettings.left * size.width),
+		y:parseInt(cropSettings.top * size.height),
+		width:parseInt((cropSettings.right - cropSettings.left) * size.width),
+		height:parseInt((cropSettings.bottom - cropSettings.top) * size.height)
+	};
+
+	var boxesWidth = $("#gridSizeSlider").slider("value");
+	$("#boxSize").text(boxesWidth + " across");
+	smallImage = originalImage.crop(cropRectangle).resize({width:boxesWidth});
+
+	$("#imgFinal").css("background-image", "url('" + smallImage.toDataURL() + "')");
+
+}
+
+var originalImage = null;
+var cropSettings = null;
+var smallImage = null;
+
+function crop(img, selection) {
+	var img = $("#tabCrop img");
+	cropSettings = {
+		left:selection.x1 / img.width(),
+		right:selection.x2 / img.width(),
+		top:selection.y1 / img.height(),
+		bottom:selection.y2 / img.height()
+	};
+	resize();
+}
+
+
+const {dialog} = require('electron').remote;
+const nativeImage = require('electron').nativeImage
+
+var ias = null;
+
+var fs = require('fs');
+function openFile() {
+	dialog.showOpenDialog({properties: ['openFile']}, function(filepaths, bookmarks) {
+		if (filepaths == null || filepaths.lenth == 0 || typeof(filepaths[0]) == "undefined") return;
+
+		originalImage = nativeImage.createFromPath(filepaths[0]);
+		var img = $("<img>");
+		$("#tabCrop").empty().append(img);
+		img.attr("src", originalImage.toDataURL());
+
+		cropSettings = {left:0.05, top:0.05, right:0.95, bottom:0.95};
+
+		setTimeout(function() {
+			reshowImage();
+		}, 20);
+
+		resize();
+
+		$("#finalTab").click();
+
+		return;
+	});
+}
+
+
+function reshowImage() {
+	var img = $("#tabCrop img");
+	if (img.length == 0) return;
+
+	var pWidth = $("#tabCrop").width();
+	var pHeight = $("#tabCrop").height();
+	var width = img.width();
+	var height = img.height();
+
+	if (pWidth/pHeight < width/height) {
+		// parent is narrower than image.  Resize down to width.
+		var newWidth = pWidth;
+		var newHeight = newWidth * height / width;
+	} else {
+		var newHeight = pHeight;
+		var newWidth = newHeight * width / height;
+	}
+	img.width(newWidth);
+	img.height(newHeight);
+
+	if (ias != null) {
+		ias.setOptions({hide:true});
+		ias.setOptions({remove:true});
+		ias.update();
+	}
+
+	ias = img.imgAreaSelect({
+		instance: true,
+		handles: true,
+		onSelectEnd: crop
+	});
+
+	ias.setSelection(
+		cropSettings.left * img.width(),
+		cropSettings.top * img.height(),
+		cropSettings.right * img.width(),
+		cropSettings.bottom * img.height()
+	);
+
+	ias.setOptions({show: true });
+	ias.update();
+}
+
+
+$(function() {
+	$("#gridSizeSlider").slider({
+		min: 3,
+		max: 100,
+		value: 15,
+		slide: function(event, ui) {
+			resize();
+		}
+	});
+
+	$("#coloursSlider").slider({
+		min: 1,
+		value: 6,
+		max: 20,
+		slide: function(event, ui) {
+			reduceColours();
+		}
+	});
+
+	$(document).on('shown.bs.tab', 'a[data-toggle="tab"]', function (e) {
+		if ($("#tabCrop").is(":visible")) {
+			if (ias != null) {
+				ias.setOptions({show:true, hide:false});
+				ias.update();
+			}
+		} else {
+			if (ias != null) {
+				ias.setOptions({show:false, hide:true});
+				ias.update();
+			}
+		}
+	})
+
+	$(window).resize(function() {
+		reshowImage();
+	});
+
+});
+
+</script>
+
+<body>
+	<div class="containerQQQ" style="padding:12px; width: calc(100% - 12px);">
+		<div class="row">
+			<div class="col-4">
+				<div class="form-group">
+					<label>The Picture</label><br>
+					<button class="btn btn-light lesserText" onclick="openFile()">Choose Image</button><br>
+					<div id="imageSize"></div>
+				</div>
+
+				<div class="form-group">
+					<label>Box Size</label><span id="boxSize" style="float:right;color: #8e8e8e">15 across</span>
+					<div id="gridSizeSlider"></div>
+					<div class="lesserText">Large<span style="float:right">Small</span></div>
+				</div>
+
+				<div class="form-group">
+					<label>Number of Colours</label><span id="coloursCount" style="float:right;color: #8e8e8e">6</span>
+					<div id="coloursSlider"></div>
+					<div class="lesserText">Few<span style="float:right">Many</span></div>
+				</div>
+
+				<div class="form-group">
+					<label>Dithering</label><br>
+					<label class="lesserText"><input type="radio" name="dithered" value="0" checked> No</label>
+					<label class="lesserText"><input type="radio" name="dithered" value="1"> Yes</label>
+				</div>
+
+				<div class="form-group">
+					<label>Save Output Image</label><br>
+					<button class="btn btn-light lesserText" onclick="openFile()">Choose File</button>
+				</div>
+
+			</div>
+
+			<div class="col-8">
+				<ul class="nav nav-tabs" role="tablist">
+				  <li class="nav-item">
+				    <a class="nav-link active" data-toggle="tab" href="#tabCrop" role="tab">Crop</a>
+				  </li>
+				  <li class="nav-item">
+				    <a class="nav-link" id="finalTab" data-toggle="tab" href="#tabFinal" role="tab">Preview</a>
+				  </li>
+				  <li class="nav-item">
+				    <a class="nav-link" data-toggle="tab" href="#tabGrid" role="tab">Grid</a>
+				  </li>
+				</ul>
+				<div class="tab-content" id="myTabContent">
+				  <div class="tab-pane fade show active" id="tabCrop" role="tabpanel" aria-labelledby="home-tab">
+				  </div>
+				  <div class="tab-pane fade" id="tabFinal" role="tabpanel" aria-labelledby="profile-tab">
+					  <div id="imgFinal"></div>
+				  </div>
+				  <div class="tab-pane fade" id="tabGrid" role="tabpanel" aria-labelledby="profile-tab">
+					  grid
+				  </div>
+				</div>
+
+			</div>
+		</div>
+	</div>
+
+
+</body>
+</html>
